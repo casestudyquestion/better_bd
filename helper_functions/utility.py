@@ -5,6 +5,7 @@ import numpy as np
 import requests
 import PyPDF2
 import os
+import re
 from dotenv import load_dotenv
 import openai
 from openai import OpenAI
@@ -41,11 +42,6 @@ def check_password():
         st.error("😕 Password incorrect")  
     return False
 
-# Function to extract text from a PDF file
-def extract_text_from_pdf(pdf_file):
-    loader = PyPDFLoader(pdf_file)
-    return loader.load_and_split()
-
 def download_pdf_to_memory(pdf_url):
     """
     Downloads a PDF file from the given URL and stores it in memory.
@@ -56,10 +52,18 @@ def download_pdf_to_memory(pdf_url):
     else:
         raise Exception(f"Failed to download the file. HTTP Status: {response.status_code}")
 
-def extract_text_from_pdf(file_like_object):
+def extract_text_from_pdf(file_like_object, exclude_section=None):
     """
-    Extracts text from a PDF file in memory.
+    Extracts text from a PDF file in memory. Excludes less relevant sections.
     """
+    exclude_sections = ["Message to Shareholders", "Board of Directors"]
+
+    if exclude_sections is not None:
+        exclude_sections.append(exclude_section)
+
+    # Compile a regex pattern to detect excluded sections
+    exclude_pattern = re.compile("|".join(re.escape(section) for section in exclude_sections), re.IGNORECASE)
+    
     reader = PdfReader(file_like_object)
     extracted_text = ""
     for page in reader.pages:
@@ -74,14 +78,22 @@ def semantic_chunking(text, chunk_size=1000, chunk_overlap=200):
     chunks = text_splitter.split_text(text)
     return chunks
 
-def analyse_with_gpt(chunks, prompt_template):
-    """
-    Runs GPT-based analysis on chunks using a specified prompt template.
-    """
-    llm = OpenAI(model="gpt-4", temperature=0.0)  # Use GPT-4 model
+def analyse_with_gpt(chunks, prompt_template, model="gpt-4o-mini"):
+    
     results = []
     for chunk in chunks:
         prompt = prompt_template.format(chunk=chunk)
-        response = llm(prompt)
+
+        messages = [{"role": "user", "content": prompt}]
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0, # lowest randomness
+        )
         results.append(response)
-    return results
+
+    return response.choices[0].message.content
+
+def estimate_tokens(prompt, model="gpt-4o-mini"):
+    encoding = tiktoken.encoding_for_model(model)
+    return len(encoding.encode(prompt))
